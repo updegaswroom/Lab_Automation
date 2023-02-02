@@ -126,10 +126,6 @@ class PRO800(object):
     *WAI
     Waiting until the last operation is completed
     """
-
-
-    
-
     def set_temp(self, value):  #":TEMP:SET <NR3>" Programs the set temperature
         if 0 <= value <= 120:
             self._send_cmd(self, ':TEMP:SET', ' ' + str(value), expect_response = False, retry = False)
@@ -181,6 +177,10 @@ class PRO800(object):
         print('Closing connection to PRO800 on %s'%(self._port))
         self.close()
 #%%
+
+def Handler_Test():
+    return 1
+    
 if __name__ == '__main__':
 
     def _readline(serialdev):
