@@ -1,28 +1,39 @@
 import serial
 import time
 
+SLEEPTIME = 0.1
+NUM_RETRIES = 5
 
-class PRO800Error(Exception):
+class PRO800InputError(Exception):
 	def __init__(self, string):
 		self.string = string		
-
 	def __str__(self):
 		return self.string
+
+class PRO800ReadError(Exception):
+	def __init__(self, string):
+		self.string = string		
+	def __str__(self):
+		return self.string
+
+class PRO800InvalidResponseException(Exception):
+    def __init__(self, cmd, resp):
+        s = 'Invalid response to %s: %s' % (cmd, resp)
+        super(PRO800InvalidResponseException, self).__init__(s)
+
 
 class PRO800(object):
 
     _port = None
     _smcID = None
     _silent = True
-    _sleepfunc = time.sleep
 
-    def __init__(self, pro800ID, port, slot, silent=True, sleepfunc=None):
+    def __init__(self, pro800ID, port, slot, silent=True):
         super(PRO800, self).__init__()
         
         assert port is not None
         assert pro800ID is not None
-        if sleepfunc is not None:
-            self._sleepfunc = sleepfunc
+
         self._silent = silent
         self._port = port
         self._last_sendcmd_time = 0
@@ -40,6 +51,7 @@ class PRO800(object):
                              dsrdtr = True)
         slot_init = ":SLOT " + str(slot)
         self.ser.write(slot_init.encode())
+        self._configure()
 
     def _send_cmd(self, command, argument, expect_response = False, retry = False):
         
@@ -53,35 +65,58 @@ class PRO800(object):
 
         done = False
         while not done:
-                if expect_response:
-                    self.ser.reset_input_buffer() #Flush input buffer, discarding all its contents.
-
-                self.ser.reset_output_buffer() #Clear output buffer, aborting the current output and discarding all that is in the buffer
-                tosend = str(command) + str(argument) + '\r\n'
-                self.ser.write(tosend.encode()) #Write the bytes data to the port, Unicode strings must be encoded 
-                
-
-                self.ser.flush() #Flush of file like objects. In this case, wait until all data is written.
-                done = True
-                print(self.ser.read())
-                prefix = 1
-                if expect_response:
-                    try:
-                        response = self._readline()
-                        if response.startswith(prefix):
-                            reply += (response[len(prefix):], )
-                            done = True
-                        else:
-                            raise PRO800Error(command, response)
-                    except Exception as ex:
-                        if not retry or retry <= 0:
-                            raise ex
-                        else:
-                            if type(retry) == int:
-                                retry -= 1
+            if expect_response:
+                self.ser.reset_input_buffer() #Flush input buffer, discarding all its contents.
+            self.ser.reset_output_buffer() #Clear output buffer, aborting the current output and discarding all that is in the buffer
+            
+            tosend = str(command) + str(argument)
+            linern = '\r\n'
+            self.ser.write(tosend.encode()) #Write the bytes data to the port, Unicode strings must be encoded 
+            self.ser.write(linern.encode())
+            self.ser.flush() #Flush of file like objects. In this case, wait until all data is written.
+            
+            prefix = '[' #set prefix of the device response
+            suffix = ']'
+            if expect_response:
+                time.sleep(SLEEPTIME)
+                try:
+                    response = self._readline()
+                    if response.startswith(prefix):
+                        return response[len(prefix):(len(response)-len(suffix))]
+                    else:
+                        raise PRO800InvalidResponseException(command, response)
+                except Exception as ex:
+                    if not retry or retry <= 0:
+                        raise ex
+                    else:
+                        if type(retry) == int:
+                            retry -= 1
                             continue
-                else:
-                    continue
+            else:
+                return None
+
+        
+
+    def _readline(self):
+        done = False
+        line = str()
+        # print 'reading line',
+        while not done:
+            c = self.ser.read()
+            time.sleep(SLEEPTIME)
+            # ignore \r since it is part of the line terminator
+            if len(c) == 0:
+                raise PRO800ReadError('len = 0')
+            elif c == '\r':
+                continue
+            elif c == '\n':
+                done = True
+            elif ord(c) > 32 and ord(c) < 127:
+                line += c
+            else:
+                raise PRO800ReadError(c)
+
+        return line
 
     def _configure(self):
          self._send_cmd(self, ':TYPE:ID', '?', expect_response = True, retry = False) #Reads the module ID (here 223 for TED8000)
@@ -90,63 +125,61 @@ class PRO800(object):
     """
     *WAI
     Waiting until the last operation is completed
-    *RST
-    Resets the PRO8000 Series: All outputs of all modules are switched
-    off, all macros are deactivated (not deleted), the unit stays in 'ready'
-    status i.e. bit 0 (FIN) of the status byte register is set. All set parameters
-    (current, power values etc. remain valid!)
     """
 
 
-    def _readline(self):
-        done = False
-        line = str()
-        # print 'reading line',
-        while not done:
-            c = self.ser.read()
-            # ignore \r since it is part of the line terminator
-            if len(c) == 0:
-                raise PRO800Error('len = 0')
-            elif c == '\r':
-                continue
-            elif c == '\n':
-                done = True
-            elif ord(c) > 32 and ord(c) < 127:
-                line += c
-            else:
-                raise PRO800Error(c)
-
-        return line
+    
 
     def set_temp(self, value):  #":TEMP:SET <NR3>" Programs the set temperature
-         self._send_cmd(self, ':TEMP:SET', ' '+ value, expect_response = True, retry = False)
+        if 0 <= value <= 120:
+            self._send_cmd(self, ':TEMP:SET', ' ' + str(value), expect_response = False, retry = False)
+        else:
+            raise PRO800InputError('Invalid Temp input')
+        
 
     def meas_temp(self):  #":TEMP:MEAS <NR1>" Programs TEMP to be the measurement value for “ELCH1)” on position <NR1> (1...8) in the output string.
-         self._send_cmd(self, ':TEMP:SET', ' 1', expect_response = True, retry = False)
+        self._send_cmd(self, ':TEMP:SET', ' 1', expect_response = False, retry = False)
 
     def get_temp_set(self): #Reads the set temperature
-         self._send_cmd(self, ':TEMP:SET', '?', expect_response = True, retry = False)
+        cmd_Tset = ':TEMP:SET'
+        response = self._send_cmd(self, cmd_Tset, '?', expect_response = True, retry = NUM_RETRIES)
+        if cmd_Tset in response:
+            return str(response[len(cmd_Tset):])
+        else:
+            raise PRO800ReadError(f'Invalid  response: {response}')
 
     def get_temp_act(self): #Reads the actual temperature
-         self._send_cmd(self, ':TEMP:ACT', '?', expect_response = True, retry = False)
+        cmd_Tact = ':TEMP:ACT'
+        response = self._send_cmd(self, cmd_Tact, '?', expect_response = True, retry = NUM_RETRIES)
+        if cmd_Tact in response:
+            return str(response[len(cmd_Tact):])
+        else:
+            raise PRO800ReadError(f'Invalid  response: {response}')
 
     def TEC_on(self): #Switches the TEC output ON
-         self._send_cmd(self, ':TEC ON', '', True, False)
-    
+        self._send_cmd(self, ':TEC ON', '', expect_response = False, retry = False)
+
     def TEC_off(self): #Switches the TEC output OFF
-         self._send_cmd(self, ':TEC OFF', '', expect_response = True, retry = False)
+        self._send_cmd(self, ':TEC OFF', '', expect_response = False, retry = False)
 
     def TEC_status(self): #":TEC?" Reads the TEC output status:
-         self._send_cmd(self, ':TEC', '?', expect_response = True, retry = False)
+        response = self._send_cmd(self, ':TEC', '?', expect_response = True, retry = NUM_RETRIES)
+        return response
 
     def get_Temp_min(self): #Reads the minimum allowed set temperature
-         self._send_cmd(self, 'TEMP:MIN', '?', expect_response = True, retry = False)
+        response = self._send_cmd(self, 'TEMP:MIN', '?', expect_response = True, retry = NUM_RETRIES)
+        return response
 
     def get_Temp_max(self):  #Reads the maximum allowed set temperature
-         self._send_cmd(self, 'TEMP:MAX', '?', expect_response = True, retry = False)
+        response = self._send_cmd(self, 'TEMP:MAX', '?', expect_response = True, retry = NUM_RETRIES)
+        return response
 
+    def close(self):
+        self.ser.close()
+            
     def __del__(self):
-        print('Closing connection to PRO8000 on %s'%(self._port))
+        print('Closing connection to PRO800 on %s'%(self._port))
+        self.close()
 #%%
 if __name__ == '__main__':
 
