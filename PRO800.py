@@ -178,13 +178,8 @@ class PRO800(object):
         self.close()
 #%%
 
-def Handler_Test():
-    return 1
-    
-if __name__ == '__main__':
-
-    def _readline(serialdev):
-        """
+def readline(serialdev):
+    """
         Returns a line, that is reads until \r\n.
         OK, so you are probably wondering why I wrote this. Why not just use
         self.ser.readline()?
@@ -198,30 +193,28 @@ if __name__ == '__main__':
         which makes sense... except pySerial doesn't pass the newline= keyword
         argument along to the underlying class, and so you can't actually change
         it.
-        """
-        done = False
-        line = str()
-        # print 'reading line',
-        while not done:
-            c = serialdev.read()
-            c = c.decode('ascii')
-            # ignore \r since it is part of the line terminator
-            if len(c) == 0:
-                raise Exception("no response")
-            elif c == '\r':
-                time.sleep(0.1)
-                continue
-            elif c == '\n':
-                time.sleep(0.1)
-                done = True
-            elif ord(c) > 32 and ord(c) < 127:
-                time.sleep(0.1)
-                line += c
-            #else:
-            #    raise Exception(c)
+    """
+    done = False
+    line = str()
+    # print 'reading line',
+    while not done:
+        c = serialdev.read()
+        c = c.decode('ascii')
+        # ignore \r since it is part of the line terminator
+        if len(c) == 0:
+            raise Exception("no response")
+        elif c == '\r':
+            time.sleep(0.1)
+            continue
+        elif c == '\n':
+            time.sleep(0.1)
+            done = True
+        elif ord(c) > 32 and ord(c) < 127:
+            time.sleep(0.1)
+            line += c
+    return line
 
-        return line
-
+def Handler_Test():
     _port = "COM3"
     ser = serial.Serial(port=_port,
                              baudrate=19200,
@@ -240,16 +233,16 @@ if __name__ == '__main__':
     ID = "*IDN?\n"
     print(ID.encode())
     ser.write(ID.encode())
-    print(_readline(ser))
+    print(readline(ser))
     SelfTest ="*TST?\n"
     print(SelfTest.encode())
     ser.write(SelfTest.encode())
-    print(_readline(ser))
+    print(readline(ser))
 
     T_read = ":TEMP:ACT?\n"
     print(T_read.encode())
     ser.write(T_read.encode())
-    print(_readline(ser))
+    print(readline(ser))
 
     T_set = ":TEMP:SET 10\n"
     print(T_set.encode())
@@ -262,14 +255,8 @@ if __name__ == '__main__':
     time.sleep(10)
     print(T_read.encode())
     ser.write(T_read.encode())
-    print(_readline(ser))
+    print(readline(ser))
     ser.close()
 
-#%%
-#TEC8000
-"""
-":TYPE:SUB?"Queries the module's sub-type: [:TYPE:SUB <NR1><LF>]where the <NR1> value stands for: 0 = Standard TED8000, 1 = TED8000-PT,2 = TED8000-KRYO
-"""
-
-
-# %%
+if __name__ == '__main__':
+    Handler_Test()
